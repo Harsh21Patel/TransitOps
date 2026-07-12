@@ -1,14 +1,11 @@
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer from '../features/auth/authSlice';
+import themeReducer from './themeSlice';
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
-    // Future slices mount here as modules are built:
-    // vehicles: vehiclesReducer,
-    // drivers: driversReducer,
-    // trips: tripsReducer,
-    // dashboard: dashboardReducer,
+    theme: themeReducer,
   },
   devTools: import.meta.env.MODE !== 'production',
 });

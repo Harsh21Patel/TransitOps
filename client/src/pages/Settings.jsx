@@ -1,144 +1,138 @@
-import { useAuth } from '../hooks/useAuth';
-import { PageHeader, FormField, inputCls, Btn } from '../components/ui';
-import { Shield, User, Sliders, Bell } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 
-const Settings = () => {
-  const { user } = useAuth();
-  const [activeSec, setActiveSec] = useState('profile');
+const RBAC_MATRIX = [
+  {
+    role: 'Fleet Manager',
+    fleet: '✓', drivers: '✓', trips: '—', fuelExp: '—', analytics: '✓',
+  },
+  {
+    role: 'Dispatcher',
+    fleet: 'View', drivers: '—', trips: '✓', fuelExp: '—', analytics: '—',
+  },
+  {
+    role: 'Safety Officer',
+    fleet: '—', drivers: '✓', trips: 'View', fuelExp: '—', analytics: '—',
+  },
+  {
+    role: 'Financial Analyst',
+    fleet: 'View', drivers: '—', trips: '—', fuelExp: '✓', analytics: '✓',
+  },
+];
 
-  const handleSave = (e) => {
+const Settings = () => {
+  const [general, setGeneral] = useState({
+    depotName: 'Gandhinagar Depot GJ4',
+    currency: 'INR (₹)',
+    distanceUnit: 'Kilometers',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (e) => {
     e.preventDefault();
-    toast.success('Settings saved locally (simulation).');
+    setSaving(true);
+    try {
+      // Persist to localStorage for now (no dedicated settings API)
+      localStorage.setItem('transitops_settings', JSON.stringify(general));
+      await new Promise(r => setTimeout(r, 600));
+      toast.success('Settings saved.');
+    } catch {
+      toast.error('Failed to save settings.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const rolesMatrix = [
-    { module: 'Dashboard', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read / Write', safety: 'Read / Write', analyst: 'Read / Write' },
-    { module: 'Fleet Registry', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read / Write', safety: 'Read / Write', analyst: 'Read Only' },
-    { module: 'Driver Profiles', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read Only', safety: 'Read / Write', analyst: 'Read Only' },
-    { module: 'Trip Dispatcher', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read / Write', safety: 'Read Only', analyst: 'Read Only' },
-    { module: 'Maintenance Logs', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read Only', safety: 'Read / Write', analyst: 'Read Only' },
-    { module: 'Fuel Logs', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read / Write', safety: 'Read Only', analyst: 'Read / Write' },
-    { module: 'Expenses', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'Read Only', safety: 'Read Only', analyst: 'Read / Write' },
-    { module: 'Reports & Exports', admin: 'Read / Write', manager: 'Read / Write', dispatcher: 'No Access', safety: 'No Access', analyst: 'Read / Write' },
-  ];
+  const getCellStyle = (val) => {
+    if (val === '✓') return 'text-gray-800 dark:text-slate-200 font-semibold';
+    if (val === 'View') return 'text-blue-600 dark:text-blue-400';
+    return 'text-gray-405 dark:text-slate-600';
+  };
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title="Settings"
-        description="Configure account details, view system settings, and inspect security access roles."
-      />
+    <div className="flex gap-10 flex-wrap lg:flex-nowrap">
+      {/* LEFT — General settings */}
+      <div style={{ minWidth: '280px', maxWidth: '360px' }}>
+        <p className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-4">General</p>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Depot Name</label>
+            <input
+              value={general.depotName}
+              onChange={e => setGeneral(g => ({ ...g, depotName: e.target.value }))}
+              placeholder="Gandhinagar Depot GJ4"
+              className="w-full border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+            />
+          </div>
 
-      <div className="flex gap-6 mt-6">
-        {/* Sidebar Nav */}
-        <div className="w-64 flex flex-col gap-1.5 flex-shrink-0">
-          {[
-            { id: 'profile', label: 'My Profile', icon: User },
-            { id: 'rbac', label: 'Role Access Matrix (RBAC)', icon: Shield },
-            { id: 'system', label: 'System Configuration', icon: Sliders },
-          ].map(s => (
-            <button
-              key={s.id}
-              onClick={() => setActiveSec(s.id)}
-              className={`flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-left transition ${activeSec === s.id ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <s.icon size={16} />
-              {s.label}
-            </button>
-          ))}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Currency</label>
+            <input
+              value={general.currency}
+              onChange={e => setGeneral(g => ({ ...g, currency: e.target.value }))}
+              placeholder="INR (₹)"
+              className="w-full border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Distance Unit</label>
+            <input
+              value={general.distanceUnit}
+              onChange={e => setGeneral(g => ({ ...g, distanceUnit: e.target.value }))}
+              placeholder="Kilometers"
+              className="w-full border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="px-5 py-2 text-sm font-semibold text-white rounded transition disabled:opacity-60 hover:opacity-90"
+            style={{ backgroundColor: '#f59e0b' }}
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </form>
+      </div>
+
+      {/* RIGHT — RBAC matrix */}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-4">Role-Based Access (RBAC)</p>
+        <div className="bg-white dark:bg-slate-900 rounded border border-gray-200 dark:border-slate-800 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-slate-800">
+                  <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Role</th>
+                  <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Fleet</th>
+                  <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Drivers</th>
+                  <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Trips</th>
+                  <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Fuel/Exp</th>
+                  <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Analytics</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+                {RBAC_MATRIX.map(row => (
+                  <tr key={row.role} className="hover:bg-gray-50 dark:hover:bg-slate-800/40 transition">
+                    <td className="px-5 py-3 text-sm font-medium text-gray-800 dark:text-slate-200">{row.role}</td>
+                    {['fleet', 'drivers', 'trips', 'fuelExp', 'analytics'].map(col => (
+                      <td key={col} className={`px-5 py-3 text-center text-sm ${getCellStyle(row[col])}`}>
+                        {row[col]}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Panel Content */}
-        <div className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          {activeSec === 'profile' && (
-            <form onSubmit={handleSave} className="space-y-4 max-w-xl">
-              <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">My Profile</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <FormField label="Full Name">
-                  <input defaultValue={user?.name} className={inputCls(false)} />
-                </FormField>
-                <FormField label="Email Address">
-                  <input defaultValue={user?.email} disabled className={`${inputCls(false)} bg-slate-50 cursor-not-allowed`} />
-                </FormField>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <FormField label="System Role">
-                  <span className="inline-block px-3 py-2 bg-amber-50 text-amber-700 font-bold border border-amber-200 text-xs rounded-lg mt-0.5">
-                    {user?.role}
-                  </span>
-                </FormField>
-                <FormField label="Contact Number">
-                  <input defaultValue={user?.phone || '—'} className={inputCls(false)} />
-                </FormField>
-              </div>
-              <div className="pt-2">
-                <Btn type="submit">Update Profile</Btn>
-              </div>
-            </form>
-          )}
-
-          {activeSec === 'rbac' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Role-Based Access Control (RBAC)</h3>
-                <p className="text-xs text-slate-400 mt-0.5">System-wide permissions matrix. Changes must be made in the server roles configuration.</p>
-              </div>
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 font-bold uppercase tracking-wider text-slate-400">
-                      <th className="px-4 py-3 text-left">Module / Resource</th>
-                      <th className="px-4 py-3 text-left">Admin</th>
-                      <th className="px-4 py-3 text-left">Fleet Mgr</th>
-                      <th className="px-4 py-3 text-left">Dispatcher</th>
-                      <th className="px-4 py-3 text-left">Safety Officer</th>
-                      <th className="px-4 py-3 text-left">Financial</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                    {rolesMatrix.map(m => (
-                      <tr key={m.module} className="hover:bg-slate-50/50 transition">
-                        <td className="px-4 py-3 text-slate-950 font-semibold">{m.module}</td>
-                        <td className="px-4 py-3 text-emerald-600 font-bold">{m.admin}</td>
-                        <td className="px-4 py-3 text-emerald-600 font-bold">{m.manager}</td>
-                        <td className="px-4 py-3">{m.dispatcher}</td>
-                        <td className="px-4 py-3">{m.safety}</td>
-                        <td className="px-4 py-3">{m.analyst}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {activeSec === 'system' && (
-            <div className="space-y-5 max-w-xl">
-              <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">System Information</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <div className="text-slate-400">WebSocket Service</div>
-                  <div className="font-semibold text-emerald-600 mt-0.5 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" /> Active (Vite Proxy)
-                  </div>
-                </div>
-                <div>
-                  <div className="text-slate-400">Database Engine</div>
-                  <div className="font-semibold text-slate-900 mt-0.5">MongoDB (Atlas)</div>
-                </div>
-                <div>
-                  <div className="text-slate-400">Platform Version</div>
-                  <div className="font-semibold text-slate-900 mt-0.5">v1.2.0 (Stable)</div>
-                </div>
-                <div>
-                  <div className="text-slate-400">API Gateway</div>
-                  <div className="font-semibold text-slate-900 mt-0.5">Express (CORS Enabled)</div>
-                </div>
-              </div>
-            </div>
-          )}
+        {/* Legend */}
+        <div className="mt-3 flex gap-4 text-xs text-gray-500 dark:text-slate-405">
+          <span><strong className="text-gray-800 dark:text-slate-200">✓</strong> = Full access</span>
+          <span><strong className="text-blue-600 dark:text-blue-400">View</strong> = Read-only</span>
+          <span><strong className="text-gray-400 dark:text-slate-600">—</strong> = No access</span>
         </div>
       </div>
     </div>

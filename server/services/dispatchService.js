@@ -95,6 +95,9 @@ const completeTrip = async (tripId) => {
 
   if (vehicle && vehicle.status !== 'Retired') {
     vehicle.status = 'Available';
+    if (trip.distance) {
+      vehicle.odometer = (vehicle.odometer || 0) + Number(trip.distance);
+    }
     await vehicle.save();
   }
   if (driver && driver.status !== 'Suspended') {

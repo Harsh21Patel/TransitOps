@@ -1,32 +1,20 @@
-import { useSelector, useDispatch } from 'react-redux';
-import { useCallback } from 'react';
-import { loginUser, logoutUser } from '../features/auth/authSlice';
+import { useContext } from 'react';
+import { AuthContext } from '../context/AuthContext';
 
 export const useAuth = () => {
-  const dispatch = useDispatch();
-  const { user, accessToken, status, error, bootstrapped } = useSelector((s) => s.auth);
-
-  const login = useCallback(
-    (credentials) => dispatch(loginUser(credentials)).unwrap(),
-    [dispatch]
-  );
-
-  const logout = useCallback(() => dispatch(logoutUser()), [dispatch]);
-
-  const hasRole = useCallback(
-    (...roles) => Boolean(user) && roles.includes(user.role),
-    [user]
-  );
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
 
   return {
-    user,
-    accessToken,
-    isAuthenticated: Boolean(user && accessToken),
-    isLoading: status === 'loading',
-    bootstrapped,
-    error,
-    login,
-    logout,
-    hasRole,
+    user: context.user,
+    accessToken: context.token,
+    isAuthenticated: context.isAuthenticated,
+    isLoading: context.isLoading,
+    bootstrapped: !context.isLoading,
+    login: context.login,
+    logout: context.logout,
+    hasRole: context.hasRole,
   };
 };

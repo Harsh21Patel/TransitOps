@@ -1,253 +1,281 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Plus, Search, Truck, Edit2, Trash2, ChevronDown, X } from 'lucide-react';
+import { vehicleService, tripService } from '../services/dataService';
+import { Plus, X, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { vehicleService } from '../services/dataService';
-import {
-  StatusBadge, Modal, ConfirmDialog, Pagination,
-  EmptyState, PageHeader, FormField, inputCls, Btn, LoadingPage
-} from '../components/ui';
 
-const VEHICLE_TYPES = ['Truck', 'Van', 'Bus', 'Pickup', 'Trailer', 'Refrigerated Truck', 'Motorcycle'];
-const VEHICLE_STATUSES = ['Available', 'On Trip', 'In Shop', 'Retired'];
+const STATUS_STYLE = {
+  Available: { bg: 'bg-green-500', label: 'Available' },
+  'On Trip':  { bg: 'bg-blue-500',  label: 'On Trip' },
+  'In Shop':  { bg: 'bg-amber-500', label: 'In Shop' },
+  Retired:    { bg: 'bg-red-500',   label: 'Retired' },
+};
 
-const schema = z.object({
-  registrationNumber: z.string().min(1, 'Registration number is required').toUpperCase(),
-  vehicleName: z.string().min(1, 'Vehicle name is required'),
-  model: z.string().min(1, 'Model is required'),
-  vehicleType: z.enum(VEHICLE_TYPES, { required_error: 'Vehicle type is required' }),
-  capacity: z.coerce.number().min(1, 'Capacity must be greater than 0'),
-  acquisitionCost: z.coerce.number().min(0, 'Acquisition cost must be non-negative'),
-  odometer: z.coerce.number().min(0).optional(),
-  status: z.enum(VEHICLE_STATUSES).optional(),
-});
-
-const VehicleForm = ({ defaultValues, onSubmit, loading, isEdit }) => {
-  const { register, handleSubmit, formState: { errors } } = useForm({
-    resolver: zodResolver(schema),
-    defaultValues: defaultValues || { odometer: 0, status: 'Available' },
-  });
-
+const StatusBadge = ({ status }) => {
+  const s = STATUS_STYLE[status] || { bg: 'bg-gray-400', label: status };
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="Registration Number" error={errors.registrationNumber?.message} required>
-          <input {...register('registrationNumber')} placeholder="GJ01AB452" className={inputCls(errors.registrationNumber)} style={{ textTransform: 'uppercase' }} />
-        </FormField>
-        <FormField label="Vehicle Name" error={errors.vehicleName?.message} required>
-          <input {...register('vehicleName')} placeholder="VAN-05" className={inputCls(errors.vehicleName)} />
-        </FormField>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="Model" error={errors.model?.message} required>
-          <input {...register('model')} placeholder="Tata Ace" className={inputCls(errors.model)} />
-        </FormField>
-        <FormField label="Vehicle Type" error={errors.vehicleType?.message} required>
-          <select {...register('vehicleType')} className={inputCls(errors.vehicleType)}>
-            <option value="">Select type…</option>
-            {VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </FormField>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="Capacity (kg)" error={errors.capacity?.message} required>
-          <input type="number" {...register('capacity')} placeholder="500" className={inputCls(errors.capacity)} />
-        </FormField>
-        <FormField label="Acquisition Cost (₹)" error={errors.acquisitionCost?.message} required>
-          <input type="number" {...register('acquisitionCost')} placeholder="620000" className={inputCls(errors.acquisitionCost)} />
-        </FormField>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="Odometer (km)" error={errors.odometer?.message}>
-          <input type="number" {...register('odometer')} placeholder="0" className={inputCls(errors.odometer)} />
-        </FormField>
-        {isEdit && (
-          <FormField label="Status" error={errors.status?.message}>
-            <select {...register('status')} className={inputCls(errors.status)}>
-              {VEHICLE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </FormField>
-        )}
-      </div>
-      <div className="flex justify-end gap-3 pt-2">
-        <Btn type="submit" loading={loading}>
-          {isEdit ? 'Save Changes' : 'Add Vehicle'}
-        </Btn>
-      </div>
-    </form>
+    <span className={`inline-block px-3 py-1 text-xs font-semibold text-white rounded ${s.bg}`}>{s.label}</span>
   );
 };
 
+const VEHICLE_TYPES = ['Truck', 'Van', 'Bus', 'Pickup', 'Trailer', 'Refrigerated Truck', 'Motorcycle'];
+
 const Fleet = () => {
-  const qc = useQueryClient();
-  const [page, setPage] = useState(1);
+  const queryClient = useQueryClient();
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [addOpen, setAddOpen] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [editVehicle, setEditVehicle] = useState(null);
-  const [deleteVehicle, setDeleteVehicle] = useState(null);
-
-  const params = { page, limit: 10, ...(search && { search }), ...(typeFilter && { vehicleType: typeFilter }), ...(statusFilter && { status: statusFilter }) };
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['vehicles', params],
-    queryFn: () => vehicleService.getAll(params),
-    keepPreviousData: true,
+  const [form, setForm] = useState({
+    registrationNumber: '', vehicleName: '', model: '', vehicleType: 'Van',
+    capacity: '', odometer: '', acquisitionCost: '', status: 'Available',
   });
+
+  const { data: resp, isLoading, isError } = useQuery({
+    queryKey: ['vehicles'],
+    queryFn: () => vehicleService.getAll(),
+  });
+
+  const { data: tripResp } = useQuery({
+    queryKey: ['trips', 'all'],
+    queryFn: () => tripService.getAll({ limit: 100 }),
+  });
+
+  const vehicles = resp?.data || resp || [];
+  const trips = tripResp?.data || tripResp || [];
 
   const createMutation = useMutation({
     mutationFn: vehicleService.create,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vehicles'] }); toast.success('Vehicle added.'); setAddOpen(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['vehicles'] }); toast.success('Vehicle added.'); closeModal(); },
     onError: (e) => toast.error(e.response?.data?.message || 'Failed to add vehicle.'),
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => vehicleService.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vehicles'] }); toast.success('Vehicle updated.'); setEditVehicle(null); },
-    onError: (e) => toast.error(e.response?.data?.message || 'Failed to update vehicle.'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['vehicles'] }); toast.success('Vehicle updated.'); closeModal(); },
+    onError: (e) => toast.error(e.response?.data?.message || 'Failed to update.'),
   });
 
   const deleteMutation = useMutation({
     mutationFn: vehicleService.remove,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vehicles'] }); toast.success('Vehicle deleted.'); setDeleteVehicle(null); },
-    onError: (e) => toast.error(e.response?.data?.message || 'Failed to delete vehicle.'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['vehicles'] }); toast.success('Vehicle removed.'); },
+    onError: (e) => toast.error(e.response?.data?.message || 'Failed to delete.'),
   });
 
-  const vehicles = data?.data || [];
-  const pagination = data?.pagination;
+  const openAdd = () => {
+    setEditVehicle(null);
+    setForm({ registrationNumber: '', vehicleName: '', model: '', vehicleType: 'Van', capacity: '', odometer: '', acquisitionCost: '', status: 'Available' });
+    setShowModal(true);
+  };
+
+  const openEdit = (v) => {
+    setEditVehicle(v);
+    setForm({
+      registrationNumber: v.registrationNumber || '',
+      vehicleName: v.vehicleName || '',
+      model: v.model || '',
+      vehicleType: v.vehicleType || 'Van',
+      capacity: v.capacity || '',
+      odometer: v.odometer || '',
+      acquisitionCost: v.acquisitionCost || '',
+      status: v.status || 'Available',
+    });
+    setShowModal(true);
+  };
+
+  const closeModal = () => { setShowModal(false); setEditVehicle(null); };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const payload = {
+      ...form,
+      capacity: form.capacity ? Number(form.capacity) : undefined,
+      odometer: form.odometer ? Number(form.odometer) : 0,
+      acquisitionCost: form.acquisitionCost ? Number(form.acquisitionCost) : undefined,
+    };
+    if (editVehicle) {
+      updateMutation.mutate({ id: editVehicle._id, data: payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
+  const filtered = vehicles.filter(v => {
+    if (typeFilter !== 'All' && v.vehicleType !== typeFilter) return false;
+    if (statusFilter !== 'All' && v.status !== statusFilter) return false;
+    if (search && !v.registrationNumber?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title="Fleet Registry"
-        description="Manage all registered vehicles, status, and operational data."
-        actions={
-          <Btn onClick={() => setAddOpen(true)}>
-            <Plus size={16} /> Add Vehicle
-          </Btn>
-        }
-      />
-
-      {/* Filters */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-5 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            value={search}
-            onChange={e => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search reg. no, name…"
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-amber-500 transition"
-          />
-        </div>
-        <div className="relative">
-          <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(1); }} className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm appearance-none cursor-pointer focus:outline-none focus:border-amber-500">
-            <option value="">Type: All</option>
-            {VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-        </div>
-        <div className="relative">
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm appearance-none cursor-pointer focus:outline-none focus:border-amber-500">
-            <option value="">Status: All</option>
-            {VEHICLE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-        </div>
-        {(search || typeFilter || statusFilter) && (
-          <button onClick={() => { setSearch(''); setTypeFilter(''); setStatusFilter(''); setPage(1); }} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700">
-            <X size={13} /> Clear
-          </button>
-        )}
+    <div>
+      {/* Top filters + Add button */}
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          className="text-sm border border-gray-300 dark:border-slate-800 rounded px-3 py-1.5 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400"
+        >
+          <option value="All">Type: All</option>
+          {VEHICLE_TYPES.map(t => <option key={t} value={t} className="dark:bg-slate-900">{`Type: ${t}`}</option>)}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="text-sm border border-gray-300 dark:border-slate-800 rounded px-3 py-1.5 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400"
+        >
+          <option value="All">Status: All</option>
+          {['Available', 'On Trip', 'In Shop', 'Retired'].map(s => <option key={s} value={s} className="dark:bg-slate-900">{`Status: ${s}`}</option>)}
+        </select>
+        <input
+          type="text"
+          placeholder="Search reg. no..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="text-sm border border-gray-300 dark:border-slate-800 rounded px-3 py-1.5 bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400 w-40"
+        />
+        <button
+          onClick={openAdd}
+          className="ml-auto flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white rounded transition hover:opacity-90"
+          style={{ backgroundColor: '#f59e0b' }}
+        >
+          <Plus size={15} />
+          Add Vehicle
+        </button>
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                {['Reg. No.', 'Name / Model', 'Type', 'Capacity', 'Odometer', 'Acq. Cost', 'Status', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-slate-400">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {isLoading ? (
-                <tr><td colSpan={8} className="py-12"><LoadingPage /></td></tr>
-              ) : vehicles.length === 0 ? (
-                <tr><td colSpan={8}>
-                  <EmptyState icon={Truck} title="No vehicles found" description="Add your first vehicle or adjust the filters." />
-                </td></tr>
-              ) : vehicles.map(v => (
-                <tr key={v._id} className="hover:bg-slate-50/70 transition group">
-                  <td className="px-4 py-3.5 font-mono font-semibold text-slate-900 text-xs">{v.registrationNumber}</td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-slate-900">{v.vehicleName}</div>
-                    <div className="text-xs text-slate-400">{v.model}</div>
-                  </td>
-                  <td className="px-4 py-3.5 text-slate-600">{v.vehicleType}</td>
-                  <td className="px-4 py-3.5 text-slate-600">{v.capacity?.toLocaleString()} kg</td>
-                  <td className="px-4 py-3.5 text-slate-600">{v.odometer?.toLocaleString()} km</td>
-                  <td className="px-4 py-3.5 text-slate-600">₹{v.acquisitionCost?.toLocaleString()}</td>
-                  <td className="px-4 py-3.5"><StatusBadge status={v.status} /></td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                      <button onClick={() => setEditVehicle(v)} className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition">
-                        <Edit2 size={14} />
-                      </button>
-                      <button onClick={() => setDeleteVehicle(v)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
+      <div className="bg-white dark:bg-slate-900 rounded border border-gray-200 dark:border-slate-800 overflow-hidden">
+        {isError ? (
+          <div className="flex flex-col items-center py-12 text-gray-400 dark:text-slate-500">
+            <AlertCircle size={28} className="mb-2 text-red-400" />
+            <p>Failed to load vehicles.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-slate-800">
+                  {['Reg. No.', 'Name/Model', 'Type', 'Capacity', 'Odometer', 'Acq. Cost', 'Status'].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {pagination && (
-          <div className="px-4">
-            <Pagination {...pagination} onPage={setPage} />
+              </thead>
+              <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+                {isLoading
+                  ? Array.from({ length: 4 }).map((_, i) => (
+                      <tr key={i}>
+                        {Array.from({ length: 7 }).map((__, j) => (
+                          <td key={j} className="px-5 py-3"><div className="h-3 bg-gray-100 dark:bg-slate-800 rounded animate-pulse" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  : filtered.length === 0
+                  ? <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400 dark:text-slate-500">No vehicles found</td></tr>
+                  : filtered.map(v => {
+                      const completedTrips = trips.filter(t => t.status === 'Completed' && String(t.vehicle?._id || t.vehicle) === String(v._id));
+                      const completedDistance = completedTrips.reduce((sum, t) => sum + (t.distance || 0), 0);
+                      const currentOdometer = (v.odometer || 0) + completedDistance;
+                      return (
+                        <tr
+                          key={v._id}
+                          className="hover:bg-gray-50 dark:hover:bg-slate-800/40 transition cursor-pointer"
+                          onClick={() => openEdit(v)}
+                        >
+                          <td className="px-5 py-3 font-mono text-xs font-semibold text-gray-800 dark:text-slate-200">{v.registrationNumber}</td>
+                          <td className="px-5 py-3 text-xs text-gray-700 dark:text-slate-300">{v.vehicleName}</td>
+                          <td className="px-5 py-3 text-xs text-gray-700 dark:text-slate-300">{v.vehicleType}</td>
+                          <td className="px-5 py-3 text-xs text-gray-700 dark:text-slate-300">{v.capacity ? `${v.capacity} kg` : '—'}</td>
+                          <td className="px-5 py-3 text-xs text-gray-700 dark:text-slate-300">{currentOdometer.toLocaleString()}</td>
+                          <td className="px-5 py-3 text-xs text-gray-700 dark:text-slate-300">
+                            {v.acquisitionCost ? v.acquisitionCost.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
+                          </td>
+                          <td className="px-5 py-3"><StatusBadge status={v.status} /></td>
+                        </tr>
+                      );
+                    })
+                }
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
-      {/* Business Rule note */}
-      <p className="mt-3 text-xs text-amber-600">
-        Rule: Registration No. must be unique · Retired / In Shop vehicles are hidden from Trip Dispatcher
-      </p>
-
-      {/* Add Modal */}
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Vehicle" subtitle="Register a new vehicle to the fleet.">
-        <VehicleForm onSubmit={createMutation.mutate} loading={createMutation.isPending} isEdit={false} />
-      </Modal>
-
-      {/* Edit Modal */}
-      <Modal open={!!editVehicle} onClose={() => setEditVehicle(null)} title="Edit Vehicle" subtitle={editVehicle?.registrationNumber}>
-        {editVehicle && (
-          <VehicleForm
-            defaultValues={editVehicle}
-            onSubmit={(data) => updateMutation.mutate({ id: editVehicle._id, data })}
-            loading={updateMutation.isPending}
-            isEdit
-          />
-        )}
-      </Modal>
-
-      {/* Delete Confirm */}
-      <ConfirmDialog
-        open={!!deleteVehicle}
-        onClose={() => setDeleteVehicle(null)}
-        onConfirm={() => deleteMutation.mutate(deleteVehicle._id)}
-        loading={deleteMutation.isPending}
-        title="Delete Vehicle"
-        message={`Permanently delete ${deleteVehicle?.vehicleName} (${deleteVehicle?.registrationNumber})? This cannot be undone.`}
-        confirmLabel="Delete Vehicle"
-      />
+      {/* ADD / EDIT MODAL */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white dark:bg-slate-900 rounded-lg border dark:border-slate-800 shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-slate-800">
+              <h3 className="text-base font-semibold text-gray-800 dark:text-slate-200">{editVehicle ? 'Edit Vehicle' : 'Add Vehicle'}</h3>
+              <button onClick={closeModal} className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300"><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-5 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Registration No.</label>
+                  <input value={form.registrationNumber} onChange={e => setForm(f => ({ ...f, registrationNumber: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400" required />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Vehicle Name</label>
+                  <input value={form.vehicleName} onChange={e => setForm(f => ({ ...f, vehicleName: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400" required />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Model (e.g. Tata Ace)</label>
+                  <input value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400" required />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Type</label>
+                  <select value={form.vehicleType} onChange={e => setForm(f => ({ ...f, vehicleType: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400">
+                    {VEHICLE_TYPES.map(t => <option key={t} className="dark:bg-slate-900">{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Capacity (kg)</label>
+                  <input type="number" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Odometer (km)</label>
+                  <input type="number" value={form.odometer} onChange={e => setForm(f => ({ ...f, odometer: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Acq. Cost (₹)</label>
+                  <input type="number" value={form.acquisitionCost} onChange={e => setForm(f => ({ ...f, acquisitionCost: e.target.value }))}
+                    className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Status</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                  className="w-full border border-gray-300 dark:border-slate-700 rounded px-3 py-2 text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-400">
+                  {['Available', 'On Trip', 'In Shop', 'Retired'].map(s => <option key={s} className="dark:bg-slate-900">{s}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-3 pt-2">
+                {editVehicle && (
+                  <button type="button"
+                    onClick={() => { if (window.confirm('Delete this vehicle?')) { deleteMutation.mutate(editVehicle._id); closeModal(); } }}
+                    className="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 dark:border-red-900/50 rounded hover:bg-red-50 dark:hover:bg-red-950/20 transition">
+                    Delete
+                  </button>
+                )}
+                <button type="button" onClick={closeModal} className="ml-auto px-4 py-2 text-sm border border-gray-300 dark:border-slate-700 rounded text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800 transition">Cancel</button>
+                <button type="submit" disabled={createMutation.isPending || updateMutation.isPending}
+                  className="px-5 py-2 text-sm font-semibold text-white rounded transition disabled:opacity-60"
+                  style={{ backgroundColor: '#f59e0b' }}>
+                  {editVehicle ? 'Save' : 'Add Vehicle'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,4 @@
 import axios from 'axios';
-import { store } from '../redux/store';
-import { setAccessToken, logoutLocal } from '../features/auth/authSlice';
 
 const api = axios.create({
   baseURL: '/api',
@@ -9,7 +7,7 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = store.getState().auth.accessToken;
+  const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -52,13 +50,13 @@ api.interceptors.response.use(
       try {
         const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
         const newToken = data.data.accessToken;
-        store.dispatch(setAccessToken(newToken));
+        localStorage.setItem('token', newToken);
         processQueue(null, newToken);
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-        store.dispatch(logoutLocal());
+        localStorage.removeItem('token');
         window.location.href = '/login';
         return Promise.reject(refreshError);
       } finally {
@@ -67,7 +65,8 @@ api.interceptors.response.use(
     }
 
     if (status === 401 && !isAuthRoute) {
-      store.dispatch(logoutLocal());
+      localStorage.removeItem('token');
+      window.location.href = '/login';
     }
 
     return Promise.reject(error);

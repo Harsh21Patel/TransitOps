@@ -1,54 +1,38 @@
 import { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useDispatch } from 'react-redux';
 import { useAuth } from '../hooks/useAuth';
-import { logoutUser } from '../features/auth/authSlice';
-import { 
-  connectSocket, 
-  disconnectSocket, 
-  getSocket 
-} from '../services/socketService';
-import { 
-  LayoutDashboard, 
-  Truck, 
-  Users, 
-  Compass, 
-  Wrench, 
-  Fuel,
-  Receipt, 
-  BarChart3, 
-  Settings, 
-  LogOut, 
-  Bell, 
-  Menu, 
-  X, 
-  Search, 
-  Wifi, 
-  WifiOff,
-  Clock
-} from 'lucide-react';
+import { connectSocket, disconnectSocket } from '../services/socketService';
+import { Search, Bell, Menu, X, Clock, Wifi, WifiOff, Truck, LogOut, Sun, Moon } from 'lucide-react';
+import { useDispatch, useSelector } from 'react-redux';
+import { toggleTheme } from '../redux/themeSlice';
 import toast from 'react-hot-toast';
+import TransitOpsLogo from '../components/TransitOpsLogo';
 
-// Roles configuration mapped to sidebar items
+// Navigation scoped strictly by role:
+//   ADMIN            → everything
+//   FLEET_MANAGER    → Fleet, Maintenance
+//   DISPATCHER       → Dashboard, Trips
+//   SAFETY_OFFICER   → Drivers
+//   FINANCIAL_ANALYST→ Fuel & Expenses, Analytics
 const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Fleet', href: '/fleet', icon: Truck, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Drivers', href: '/drivers', icon: Users, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Trips', href: '/trips', icon: Compass, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Maintenance', href: '/maintenance', icon: Wrench, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Fuel Log', href: '/fuel', icon: Fuel, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Expenses', href: '/expenses', icon: Receipt, roles: ['Admin', 'Fleet Manager', 'Dispatcher', 'Safety Officer', 'Financial Analyst'] },
-  { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['Admin', 'Fleet Manager', 'Financial Analyst'] },
-  { name: 'Settings', href: '/settings', icon: Settings, roles: ['Admin'] },
+  { name: 'Dashboard',     href: '/dashboard',    roles: ['ADMIN', 'DISPATCHER'] },
+  { name: 'Fleet',         href: '/fleet',         roles: ['ADMIN', 'FLEET_MANAGER'] },
+  { name: 'Drivers',       href: '/drivers',       roles: ['ADMIN', 'SAFETY_OFFICER'] },
+  { name: 'Trips',         href: '/trips',         roles: ['ADMIN', 'DISPATCHER'] },
+  { name: 'Maintenance',   href: '/maintenance',   roles: ['ADMIN', 'FLEET_MANAGER'] },
+  { name: 'Fuel & Expenses', href: '/fuel',        roles: ['ADMIN', 'FINANCIAL_ANALYST'] },
+  { name: 'Analytics',     href: '/reports',       roles: ['ADMIN', 'FLEET_MANAGER', 'FINANCIAL_ANALYST'] },
+  { name: 'Settings',      href: '/settings',      roles: ['ADMIN'] },
 ];
 
 const DashboardLayout = () => {
-  const { user, accessToken } = useAuth();
-  const dispatch = useDispatch();
+  const { user, accessToken, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const dispatch = useDispatch();
+  const theme = useSelector((state) => state.theme.mode);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -56,7 +40,6 @@ const DashboardLayout = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationRef = useRef(null);
 
-  // Close notifications dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (notificationRef.current && !notificationRef.current.contains(event.target)) {
@@ -67,77 +50,41 @@ const DashboardLayout = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Connect / Disconnect socket lifecycle
   useEffect(() => {
     if (!accessToken) return;
-
     const socketInstance = connectSocket(accessToken);
+    const handleConnect = () => setSocketConnected(true);
+    const handleDisconnect = () => setSocketConnected(false);
+    const handleConnectError = () => setSocketConnected(false);
 
-    const handleConnect = () => {
-      setSocketConnected(true);
-    };
-
-    const handleDisconnect = () => {
-      setSocketConnected(false);
-    };
-
-    const handleConnectError = () => {
-      setSocketConnected(false);
-    };
-
-    // Attach base events
     socketInstance.on('connect', handleConnect);
     socketInstance.on('disconnect', handleDisconnect);
     socketInstance.on('connect_error', handleConnectError);
+    if (socketInstance.connected) setSocketConnected(true);
 
-    // Initial state check
-    if (socketInstance.connected) {
-      setSocketConnected(true);
-    }
-
-    // Handlers for real-time operations updates
     const handleTripEvent = (eventTitle, statusColor) => (trip) => {
-      // Invalidate React Query's dashboard queries to pull fresh KPIs and widgets
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-
-      // Generate a detailed notification item
       const newNotification = {
         id: Math.random().toString(36).substr(2, 9),
         title: `${eventTitle}: ${trip.tripCode}`,
-        message: `${trip.source} → ${trip.destination} (${trip.vehicle?.vehicleName || 'Vehicle Assigned'})`,
+        message: `${trip.source} → ${trip.destination}`,
         time: new Date(),
         statusColor,
       };
-
-      setNotifications((prev) => [newNotification, ...prev].slice(0, 50)); // limit to 50 logs
-
-      // Trigger beautiful toast alert
+      setNotifications((prev) => [newNotification, ...prev].slice(0, 50));
       toast.custom((t) => (
-        <div
-          className={`${
-            t.visible ? 'animate-enter' : 'animate-leave'
-          } max-w-md w-full bg-white shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5`}
-        >
+        <div className={`${t.visible ? 'animate-enter' : 'animate-leave'} max-w-md w-full bg-white shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5`}>
           <div className="flex-1 w-0 p-4">
             <div className="flex items-start">
-              <div className="flex-shrink-0 pt-0.5">
-                <Truck className="h-10 w-10 text-amber-500 bg-amber-50 p-2 rounded-full" />
-              </div>
+              <Truck className="h-8 w-8 text-amber-500 bg-amber-50 p-1.5 rounded-full flex-shrink-0" />
               <div className="ml-3 flex-1">
-                <p className="text-sm font-medium text-slate-900">
-                  {newNotification.title}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {newNotification.message}
-                </p>
+                <p className="text-sm font-medium text-slate-900">{newNotification.title}</p>
+                <p className="mt-1 text-xs text-slate-500">{newNotification.message}</p>
               </div>
             </div>
           </div>
           <div className="flex border-l border-slate-200">
-            <button
-              onClick={() => toast.dismiss(t.id)}
-              className="w-full border border-transparent rounded-none rounded-r-lg p-4 flex items-center justify-center text-sm font-medium text-slate-600 hover:text-slate-500 focus:outline-none"
-            >
+            <button onClick={() => toast.dismiss(t.id)} className="w-full border border-transparent rounded-none rounded-r-lg p-4 flex items-center justify-center text-sm font-medium text-slate-600 hover:text-slate-500 focus:outline-none">
               Dismiss
             </button>
           </div>
@@ -145,273 +92,217 @@ const DashboardLayout = () => {
       ), { duration: 4000 });
     };
 
-    // Socket.IO event registrations
     socketInstance.on('trip:created', handleTripEvent('New Trip Drafted', 'bg-slate-500'));
     socketInstance.on('trip:dispatched', handleTripEvent('Trip Dispatched', 'bg-blue-500'));
-    socketInstance.on('trip:completed', handleTripEvent('Trip Completed Successfully', 'bg-emerald-500'));
+    socketInstance.on('trip:completed', handleTripEvent('Trip Completed', 'bg-emerald-500'));
     socketInstance.on('trip:cancelled', handleTripEvent('Trip Cancelled', 'bg-rose-500'));
 
     return () => {
-      if (socketInstance) {
-        socketInstance.off('connect', handleConnect);
-        socketInstance.off('disconnect', handleDisconnect);
-        socketInstance.off('connect_error', handleConnectError);
-        socketInstance.off('trip:created');
-        socketInstance.off('trip:dispatched');
-        socketInstance.off('trip:completed');
-        socketInstance.off('trip:cancelled');
-      }
+      socketInstance.off('connect', handleConnect);
+      socketInstance.off('disconnect', handleDisconnect);
+      socketInstance.off('connect_error', handleConnectError);
+      socketInstance.off('trip:created');
+      socketInstance.off('trip:dispatched');
+      socketInstance.off('trip:completed');
+      socketInstance.off('trip:cancelled');
       disconnectSocket();
     };
   }, [accessToken, queryClient]);
 
   const handleLogout = async () => {
     try {
-      await dispatch(logoutUser()).unwrap();
+      await logout();
       toast.success('Logged out successfully.');
       navigate('/login');
-    } catch (err) {
+    } catch {
       toast.error('Failed to log out.');
     }
   };
 
   const getInitials = (name) => {
     if (!name) return 'U';
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
+    return name.split(' ').map((n) => n[0]).join('').toUpperCase().substring(0, 2);
   };
 
-  // Filter menu links based on role permissions
+  // Abbreviated display name: "Raven K."
+  const getShortName = (name) => {
+    if (!name) return '';
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+  };
+
+  const getRoleLabel = (role) => {
+    const map = {
+      ADMIN: 'Admin',
+      FLEET_MANAGER: 'Fleet Mgr',
+      DISPATCHER: 'Dispatcher',
+      SAFETY_OFFICER: 'Safety Officer',
+      FINANCIAL_ANALYST: 'Fin. Analyst',
+    };
+    return map[role] || role;
+  };
+
   const allowedNavigation = navigation.filter(
     (item) => user && item.roles.includes(user.role)
   );
 
-  return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      {/* --- DESKTOP SIDEBAR --- */}
-      <aside className="hidden md:flex md:flex-col md:w-64 bg-white border-r border-slate-200">
-        {/* Brand Header */}
-        <div className="flex h-16 items-center px-6 gap-2.5 border-b border-slate-100">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500 text-white shadow-md shadow-amber-500/20">
-            <Truck size={20} className="stroke-[2.5]" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">TransitOps</span>
-        </div>
+  const SidebarContent = () => (
+    <>
+      {/* Brand */}
+      <div className="px-4 pt-4 pb-4 border-b border-gray-200 dark:border-slate-800">
+        <TransitOpsLogo size={28} variant="full" theme={theme === 'dark' ? 'dark' : 'light'} />
+      </div>
 
-        {/* Navigation Links */}
-        <nav className="flex-1 space-y-1 px-4 py-6 overflow-y-auto">
-          {allowedNavigation.map((item) => {
-            const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all ${
-                  isActive
-                    ? 'bg-amber-50/70 text-amber-800 border-l-4 border-amber-500 pl-3'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                <Icon size={18} className={isActive ? 'text-amber-600' : 'text-slate-400'} />
-                {item.name}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* User profile section */}
-        <div className="p-4 border-t border-slate-100">
-          <div className="flex items-center gap-3 px-2 py-1.5 bg-slate-50 rounded-xl">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800 font-semibold text-sm">
-              {getInitials(user?.name)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-900 truncate">
-                {user?.name?.split(' ')[0]} {user?.name?.split(' ').slice(1).map(n => n[0]).join('.')}
-              </p>
-              <span className="inline-block px-1.5 py-0.5 mt-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded-full">
-                {user?.role}
-              </span>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
-              title="Logout"
+      {/* Nav Links */}
+      <nav className="flex-1 py-4 overflow-y-auto">
+        {allowedNavigation.map((item) => {
+          const isActive =
+            location.pathname === item.href ||
+            location.pathname.startsWith(item.href + '/') ||
+            // Match role dashboards under /dashboard
+            (item.href === '/dashboard' && location.pathname.endsWith('/dashboard'));
+          return (
+            <Link
+              key={item.name}
+              to={item.href}
+              onClick={() => setSidebarOpen(false)}
+              className={`block px-5 py-2.5 text-sm transition-colors ${
+                isActive
+                  ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 font-semibold border-l-4 border-amber-500 pl-4'
+                  : 'text-gray-700 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800/60 hover:text-gray-900 dark:hover:text-slate-100 font-normal'
+              }`}
             >
-              <LogOut size={16} />
-            </button>
+              {item.name}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* Footer */}
+      <div className="p-4 border-t border-gray-200 dark:border-slate-800">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-semibold text-xs flex-shrink-0">
+            {getInitials(user?.name)}
           </div>
+          <span className="text-xs text-gray-600 dark:text-slate-400 flex-1 truncate">{user?.name}</span>
+          <button
+            onClick={handleLogout}
+            title="Logout"
+            className="p-1 text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition"
+          >
+            <LogOut size={14} />
+          </button>
         </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex h-screen bg-gray-100 dark:bg-slate-950 overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
+      {/* DESKTOP SIDEBAR */}
+      <aside className="hidden md:flex md:flex-col bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-800" style={{ width: '160px', minWidth: '160px' }}>
+        <SidebarContent />
       </aside>
 
-      {/* --- MOBILE SIDEBAR DRAWER --- */}
+      {/* MOBILE SIDEBAR */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden bg-slate-900/40 backdrop-blur-sm">
-          <div className="relative flex flex-col w-64 max-w-xs bg-white animate-slide-right">
-            <div className="flex h-16 items-center justify-between px-6 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500 text-white">
-                  <Truck size={18} />
-                </div>
-                <span className="text-lg font-bold text-slate-900">TransitOps</span>
-              </div>
-              <button
-                onClick={() => setSidebarOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
-              >
-                <X size={20} />
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSidebarOpen(false)} />
+          <aside className="relative flex flex-col bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-800" style={{ width: '200px' }}>
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-gray-200 dark:border-slate-800">
+              <TransitOpsLogo size={26} variant="full" theme={theme === 'dark' ? 'dark' : 'light'} />
+              <button onClick={() => setSidebarOpen(false)} className="p-1 text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-350">
+                <X size={18} />
               </button>
             </div>
-
-            <nav className="flex-1 space-y-1 px-4 py-6 overflow-y-auto">
+            <nav className="flex-1 py-4 overflow-y-auto">
               {allowedNavigation.map((item) => {
-                const isActive = location.pathname === item.href;
-                const Icon = item.icon;
+                const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
                 return (
                   <Link
                     key={item.name}
                     to={item.href}
                     onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all ${
+                    className={`block px-5 py-2.5 text-sm transition-colors ${
                       isActive
-                        ? 'bg-amber-50 text-amber-800 border-l-4 border-amber-500 pl-3'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 font-semibold border-l-4 border-amber-500 pl-4'
+                        : 'text-gray-700 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800/60 font-normal'
                     }`}
                   >
-                    <Icon size={18} className={isActive ? 'text-amber-600' : 'text-slate-400'} />
                     {item.name}
                   </Link>
                 );
               })}
             </nav>
-
-            <div className="p-4 border-t border-slate-100">
-              <div className="flex items-center gap-3 px-2 py-1.5 bg-slate-50 rounded-xl">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800 font-semibold text-sm">
-                  {getInitials(user?.name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-900 truncate">
-                    {user?.name}
-                  </p>
-                  <span className="inline-block px-1.5 py-0.5 mt-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded-full">
-                    {user?.role}
-                  </span>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition"
-                >
-                  <LogOut size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
+          </aside>
         </div>
       )}
 
-      {/* --- MAIN PAGE ROUTER CONTENT AREA --- */}
+      {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Header Bar */}
-        <header className="flex h-16 items-center justify-between px-6 bg-white border-b border-slate-200">
-          <div className="flex items-center gap-4">
-            {/* Toggle mobile sidebar */}
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden transition"
-            >
-              <Menu size={20} />
+        {/* Top Navbar */}
+        <header className="flex h-12 items-center justify-between px-4 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSidebarOpen(true)} className="p-1 text-gray-500 dark:text-slate-400 md:hidden">
+              <Menu size={18} />
             </button>
-
-            {/* Breadcrumb / Search bar layout */}
-            <div className="relative hidden sm:block w-72">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-                <Search size={16} />
-              </span>
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
               <input
                 type="text"
                 placeholder="Search..."
-                className="w-full pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition"
+                className="pl-8 pr-3 py-1.5 text-sm bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded focus:outline-none focus:ring-1 focus:ring-amber-400 w-52 text-gray-900 dark:text-slate-100"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            {/* Socket connection indicator */}
-            <div 
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                socketConnected 
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                  : 'bg-slate-50 text-slate-500 border-slate-200'
-              }`}
-              title={socketConnected ? 'Real-time sync active' : 'Offline. Reconnecting...'}
-            >
-              {socketConnected ? (
-                <>
-                  <Wifi size={13} className="text-emerald-500" />
-                  <span className="hidden xs:inline">Live</span>
-                </>
-              ) : (
-                <>
-                  <WifiOff size={13} className="text-slate-400" />
-                  <span className="hidden xs:inline">Disconnected</span>
-                </>
-              )}
+          <div className="flex items-center gap-3">
+            {/* Live indicator */}
+            <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${socketConnected ? 'bg-green-50 dark:bg-green-950/20 text-green-700 dark:text-green-400' : 'bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400'}`}>
+              {socketConnected ? <Wifi size={11} /> : <WifiOff size={11} />}
+              <span className="hidden sm:inline">{socketConnected ? 'Live' : 'Offline'}</span>
             </div>
 
-            {/* Notifications Alert Dropdown */}
+            {/* Dark mode toggle */}
+            <button
+              onClick={() => dispatch(toggleTheme())}
+              className="p-1.5 rounded-full border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-500 dark:text-slate-400 transition"
+              title="Toggle Dark Mode"
+            >
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+            </button>
+
+            {/* Notifications */}
             <div className="relative" ref={notificationRef}>
               <button
                 onClick={() => setShowNotifications((v) => !v)}
-                className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                className="relative p-1.5 text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded transition"
               >
-                <Bell size={20} />
+                <Bell size={16} />
                 {notifications.length > 0 && (
-                  <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                  </span>
+                  <span className="absolute top-1 right-1 h-2 w-2 bg-amber-500 rounded-full" />
                 )}
               </button>
-
-              {/* Dropdown Panel */}
               {showNotifications && (
-                <div className="absolute right-0 mt-2.5 w-80 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                    <h3 className="text-sm font-semibold text-slate-800">Operations Log</h3>
-                    <button
-                      onClick={() => setNotifications([])}
-                      className="text-xs text-slate-400 hover:text-slate-600 font-medium"
-                    >
-                      Clear All
-                    </button>
+                <div className="absolute right-0 top-full mt-1 w-72 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg shadow-lg z-50 overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-slate-800">
+                    <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">Operations Log</span>
+                    <button onClick={() => setNotifications([])} className="text-xs text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-350">Clear</button>
                   </div>
-
-                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                  <div className="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800">
                     {notifications.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-center px-4">
-                        <Clock size={28} className="text-slate-300 mb-2" />
-                        <p className="text-xs text-slate-400">No recent operations notifications</p>
+                      <div className="flex flex-col items-center py-6 text-gray-400 dark:text-slate-500">
+                        <Clock size={20} className="mb-1" />
+                        <p className="text-xs">No recent events</p>
                       </div>
                     ) : (
-                      notifications.map((notif) => (
-                        <div key={notif.id} className="p-3.5 hover:bg-slate-50/50 flex gap-2.5 transition">
-                          <span className={`h-2 w-2 mt-1.5 rounded-full flex-shrink-0 ${notif.statusColor}`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-slate-900 truncate">
-                              {notif.title}
-                            </p>
-                            <p className="text-[11px] text-slate-500 mt-0.5 leading-normal">
-                              {notif.message}
-                            </p>
-                            <span className="text-[10px] text-slate-400 mt-1 block">
-                              {new Date(notif.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                      notifications.map((n) => (
+                        <div key={n.id} className="px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-slate-800/50 flex gap-2">
+                          <span className={`h-2 w-2 mt-1 rounded-full flex-shrink-0 ${n.statusColor}`} />
+                          <div>
+                            <p className="text-xs font-medium text-gray-800 dark:text-slate-300">{n.title}</p>
+                            <p className="text-xs text-gray-500 dark:text-slate-400">{n.message}</p>
                           </div>
                         </div>
                       ))
@@ -421,21 +312,20 @@ const DashboardLayout = () => {
               )}
             </div>
 
-            {/* Profile Info pill */}
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-              <span className="text-sm font-medium text-slate-700 hidden sm:inline">{user?.name}</span>
-              <span className="hidden xs:inline-block px-2 py-0.5 text-[11px] font-semibold bg-blue-100 text-blue-800 rounded-full">
-                {user?.role}
-              </span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 text-white font-bold text-xs ring-2 ring-amber-100 shadow-sm shadow-amber-500/10">
-                {getInitials(user?.name)}
+            {/* User chip */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-blue-500 text-white rounded-full px-2 py-0.5">
+                <span className="text-xs font-medium hidden sm:inline">{getRoleLabel(user?.role)}</span>
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white font-bold text-[10px]">
+                  {getInitials(user?.name)}
+                </div>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Page Content area */}
-        <main className="flex-1 overflow-auto bg-slate-50">
+        {/* Page Content */}
+        <main className="flex-1 overflow-auto bg-gray-50 dark:bg-slate-950 p-6">
           <Outlet />
         </main>
       </div>
